@@ -1,0 +1,96 @@
+name: Module 5 CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Run Tests and Upload Artifact
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run test and save result
+        run: |
+          mkdir -p reports
+          echo "=== Test Execution Started ===" > reports/test-results.txt
+          date >> reports/test-results.txt
+          echo "" >> reports/test-results.txt
+
+          if npm run check >> reports/test-results.txt 2>&1; then
+            echo "" >> reports/test-results.txt
+            echo "STATUS: TEST PASSED" >> reports/test-results.txt
+          else
+            echo "" >> reports/test-results.txt
+            echo "STATUS: TEST FAILED" >> reports/test-results.txt
+            exit 1
+          fi
+
+      - name: Show test result in log
+        run: cat reports/test-results.txt
+
+      - name: Upload test results artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: reports/test-results.txt
+
+  deploy:
+    name: Deploy to Self-Hosted Runner
+    needs: test
+    runs-on: [self-hosted, linux, x64]
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Download test results artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: test-results
+          path: downloaded-artifacts
+
+      - name: Display artifact content
+        run: |
+          echo "=== Downloaded Artifact Content ==="
+          cat downloaded-artifacts/test-results.txt
+
+      - name: Ensure PM2 is installed
+        run: |
+          if ! command -v pm2 >/dev/null 2>&1; then
+            npm install -g pm2
+          fi
+
+      - name: Deploy application with PM2
+        run: |
+          pm2 delete node-app || true
+          pm2 start "./src/server.js" --name node-app
+          pm2 save
+          pm2 status
+
+      - name: Verify application is running
+        run: |
+          sleep 5
+          curl -I http://localhost:3000 || true
+          curl http://localhost:3000 || true
